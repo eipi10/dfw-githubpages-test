@@ -1,0 +1,856 @@
+---
+title: "Course DFW Trends"
+author: |
+    | Joel Schwartz
+    | University Initiatives and Student Success
+    | California State University, Sacramento
+date: "April 14, 2022"
+output:
+  xaringan::moon_reader:
+    #css: [default, "Wilke-slides-theme.css"]
+    #chakra: libs/remark-latest.min.js
+    lib_dir: libs
+    nature:
+      ratio: '16:9'
+      highlightStyle: github
+      highlightLines: true
+      #slideNumberFormat: ''
+      titleSlideClass: [center, middle]
+---
+
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(comment = "")
+
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, 
+                      #fig.retina=3, # Poor quality, still didn't display in Chrome
+                      dev="svg",
+                      fig.asp=0.618, fig.width=9)
+
+library(splines)
+library(ggh4x)
+library(knitr)
+library(kableExtra)
+library(colorspace)
+library(udwverse)
+library(ggdist)
+library(ggstance)
+
+theme_set(theme_classic2(cap.size=0.55) + 
+            theme(strip.text=element_text(size=rel(0.9)),
+                  panel.background = element_rect(colour = "grey65", 
+        fill = NA, size = 0.25)))
+
+#theme_set(theme_bw())
+
+con=connect_to_udw()
+
+```
+
+```{r xaringan-panelset, echo=FALSE}
+xaringanExtra::use_panelset()
+```
+
+```{r load-premade-data}
+
+cls = read_fst("cls.for.dfw.fst")
+cls = cls %>% mutate(urm.ipeds.term = get_urm_status(eth.ipeds.term))
+cls = cls %>% filter(term < current_term())
+
+
+l = read_fst("l.for.dfw.fst")
+
+```
+
+
+```{r helper-functions}
+source("r/functions.r")
+
+```
+
+
+### Course DFW rate, all undergraduates
+
+.small-font[
+```{r p-dfw-trend, eval=FALSE}
+pdat = cls %>%
+  filter(erss=="Y", grepl("Fall|Spring", term), 
+  ) %>% 
+  summarize_all_group_combinations(
+    value.vars=dfw.flg,
+    static.groups=term.grps,
+    combo.groups = c("plan.college1", term.demog.grps),
+    FUNS = funs.wt,
+    max.k=1
+  ) %>% 
+  clean_up() %>% 
+  mutate(Group=abbreviate_labels(Group, "max")) %>% 
+  filter(term.abbr >= min.term.abbr)
+
+plot_fnc(pdat, term.abbr, dfw.flg_mean, ylim=c(0, 0.26), caption="Term")
+```
+]
+
+.center[
+```{r p-dfw-trend-out, ref.label="p-dfw-trend"}
+```
+]
+
+---
+
+### Course DFW rate, first-time students in first semester
+
+.small-font[
+```{r p-dfwftf-trend, eval=FALSE}
+pdat = cls %>%
+  filter(erss=="Y", grepl("Fall|Spring", term)) %>% 
+  summarize_all_group_combinations(
+    value.vars=dfw.flg,
+    static.groups=c(term.grps, coh.grps),
+    combo.groups = c("plan.college1", term.demog.grps),
+    FUNS = funs.wt,
+    max.k=1
+  ) %>% 
+  clean_up() %>% 
+  mutate(Group=abbreviate_labels(Group, "max")) %>% 
+  filter(coh.term.abbr >= min.coh.term.abbr)
+
+pdat %>% 
+  filter(grepl("F", coh.term.abbr), grepl("Fr", coh), base.time==1) %>% 
+  plot_fnc(coh.term.abbr, dfw.flg_mean, ylim=c(0, 0.35), caption="Cohort Entering Term")
+```
+]
+
+.center[
+```{r p-dfwftf-trend-out, ref.label="p-dfwftf-trend"}
+```
+]
+
+---
+
+### Courses with DFW rate of greater than 20% for Spring/Fall 2021
+
+.small-font[
+```{r p-high-dfw-courses, eval=FALSE}
+pdat = cls %>% 
+  filter(term %in% c("Spring 2021", "Fall 2021")) %>% #filter(course=="HRS 114") %>% select(emplid, course, urm.ipeds.term, grade)
+  filter(unt.taken>=2, erss=="Y", session.code==1)
+
+pdat = pdat %>% 
+  summarize_all_group_combinations(dfw.flg, 
+                                   static.groups=c("acad.group", "div", "course"),
+                                   combo.groups=c("eth.ipeds.foreign.term", "urm.ipeds.term", "gender", 
+                                                  "pell.term.flg", "first.gen.no.college.attendance"), 
+                                   max.k=1)
+
+# Get overall DFW rates
+pdat = pdat %>% 
+  arrange(desc(Variable=="All"), desc(dfw.flg_mean)) %>% 
+  mutate(course=fct_inorder(course)) %>% 
+  arrange(course, Variable, Group)
+
+
+pdat = pdat %>% mutate(Variable=recode(Variable, 
+                                       "IPEDS Race/Ethnicity Category"="Ethnicity",
+                                       "First Generation Status (neither parent attended college at all)"="First Generation Status"))
+
+
+pfnc = function(data, div1, xsize=0.9, n.courses=2000) {
+  data %>% 
+    filter(div==div1) %>% 
+    filter(Group %in% c("All", "URM", "Non-URM")) %>% 
+    arrange(desc(Group=="All"), desc(dfw.flg_mean)) %>% 
+    mutate(course=fct_inorder(as.character(course))) %>% 
+    group_by(acad.group) %>% 
+    filter(course %in% unique(course)[1:n.courses]) %>% 
+    ggplot(aes(course, dfw.flg_mean, colour=Group, group=course)) + 
+      geom_line(colour="grey70", size=0.2) +
+      geom_point(aes(size=n)) +
+      theme_classic2(base.size=10) +
+      theme(panel.grid.major.y=element_line(),
+            legend.text=element_text(margin=margin(l=-7)),
+            axis.text.x=element_text(size=rel(xsize))) +
+            thm_rotate_xvar() +
+      scale_y_pct(expd=c(0.01,0.01), limits=c(0,1), breaks=seq(0,1,0.1)) +
+      theme(legend.position="bottom") +
+      labs_remove() + labs(size="Enrollment") +
+      facet_grid(cols=vars(acad.group), scales="free_x", space="free_x") +
+      scale_size_continuous(range=c(0.05,5), limits=c(1,2000), breaks=c(20,100,500,1000,1500)) +
+        guides(colour=guide_legend(override.aes=list(size=3))) +
+    scale_colour_manual(values=c("All"="grey40", hcl(c(0,220), 50, 70) %>%
+                                   set_names("URM","Non-URM")))
+}
+
+
+pdat1 = pdat  %>% 
+  group_by(course) %>% 
+  filter(any(n >= 20), any(Group=="All" & dfw.flg_mean >= .2)) %>% 
+  ungroup()
+
+pdat1 %>% 
+  pfnc(div1="Upper") + labs(title="Upper Division") +
+  pdat1 %>% pfnc(div1="Lower", n.courses=40) + labs(title="Lower Division") +
+  plot_layout(ncol=1, guides="collect") +
+  plot_annotation(theme=theme(legend.position="bottom", 
+                              legend.box.margin=margin(t=-5)))
+
+
+# cls %>%
+#   #filter(term %in% c("Spring 2021", "Fall 2021")) %>%
+#   filter(course=="PHYS 135") %>% npct(term, dfw.flg) %>% 
+#   filter(dfw.flg)
+
+#pdat %>% filter(course=="HRS 114", Variable %in% c("All", "URM Status")) %>% ha
+```
+]
+
+.center[
+```{r p-high-dfw-courses-out, ref.label="p-high-dfw-courses", fig.width=13, fig.asp=0.52}
+```
+]
+
+
+---
+
+### DFW rate and URM equity gap by college and course
+
+```{r}
+library(ggh4x)
+
+min.enrl=20
+
+pdat = cls %>%
+  filter(term %in% c("Spring 2021", "Fall 2021")) %>% #filter(course=="HRS 114") %>% select(emplid, course, urm.ipeds.term, grade)
+  filter(unt.taken>=2, erss=="Y", session.code==1) %>% 
+  group_by(course) %>% 
+  filter(max(n())>=min.enrl) %>% 
+  ungroup
+
+pdat = pdat %>%
+  summarize_all_group_combinations(dfw.flg,
+                                   static.groups=c("acad.group", "dept","dept.abbr", "div", "course"),
+                                   combo.groups=c("urm.ipeds.term"),
+                                   max.k=1)
+
+# Get overall DFW rates
+pdat = pdat %>%
+  arrange(desc(Variable=="All"), div, desc(dfw.flg_mean)) %>%
+  mutate(course=fct_inorder(course)) %>%
+  arrange(course, Variable, Group)
+
+pdat = pdat %>% 
+  group_by(acad.group, dept) %>% 
+  mutate(dept = case_when(length(unique(course)) <= 5 ~ dept.abbr,
+                          nchar(dept) > 25 & length(unique(course)) <= 10 ~ dept.abbr,
+                          TRUE ~ dept)) %>% 
+  ungroup
+
+# Get each subject's percent for each college
+dept.pct = pdat %>%
+  filter(Variable=="All") %>%
+  group_by(acad.group, dept) %>%
+  tally %>%
+  mutate(pct=cumsum(n/sum(n)))
+
+
+# Get indices of subjects that go in each row
+row.max=140
+colleges = sort(unique(pdat$acad.group)) %>% set_names()
+plot.rows = colleges %>% map(
+  ~{
+    pdat1 = pdat %>% filter(acad.group==.x)
+    dept.pct1 = dept.pct %>% filter(acad.group==.x)
+
+    ntot = sum(dept.pct1$n)
+
+    num.rows = max(round(ntot/ifelse(.x %in% c("ECS","NSM","HHS","SSIS"), 100, row.max)), 1)
+
+    # Cum pct break points
+  pct.breaks = seq(0,1, 1/num.rows)
+  pct.breaks = pct.breaks[-1]
+
+  breaks = map_int(1:length(pct.breaks),
+                   ~which.min(abs(dept.pct1$pct - .x/num.rows)))
+
+  map2(c(0,breaks[-length(breaks)]), breaks,
+       ~(.x+1):.y)
+  }
+)
+
+tabs = list()
+
+maxy = round(max(pdat$dfw.flg_mean)*10)/10
+
+for(i in colleges) {
+
+  
+  pl = map(plot.rows[[i]],
+           ~{
+             
+             pdept = dept.pct %>%
+               filter(acad.group==i) %>%
+               slice(.x) %>%
+               pull(dept)
+             
+             pdat = pdat %>%
+               filter(dept %in% pdept) 
+             
+             # Place lower/upper separator
+             x.vline = pdat %>% 
+               filter(Variable=="All", div=="Lower") %>%
+               count(dept) %>% 
+               ungroup %>% 
+               mutate(n = n + 0.5)
+             
+             pdat %>%
+               ggplot(aes(course, dfw.flg_mean, colour=Group, group=course)) +
+               geom_line(colour="grey70", size=0.2) +
+               geom_point(aes(size=n)) +
+               geom_vline(data=x.vline, aes(xintercept=n),
+                          size=0.25, colour="grey85") +
+               theme_classic2(base.size=10) +
+               theme(panel.grid.major.y=element_line(),
+                     strip.text.x=element_text(size=rel(1.05)),
+                     legend.text=element_text(margin=margin(l=-7))) +
+               thm_rotate_xvar() +
+               scale_y_pct(expd=c(0.01,0.01), limits=c(0,1), breaks=seq(0,1,0.1)) +
+               theme(legend.position="bottom",
+                     axis.text.x=element_text(size=rel(ifelse(.x=="ALS", 0.7, 0.8))),
+                     axis.text.y=element_text(siz=rel(0.7))) +
+               labs_remove() + labs(size="Enrollment") +
+               facet_grid(cols=vars(dept), scales="free_x", space="free_x") +
+               scale_size_continuous(range=c(0.05,5), limits=c(1,2000), breaks=c(20,100,500,1000,1500)) +
+               guides(colour=guide_legend(override.aes=list(size=3))) +
+               scale_colour_manual(values=c("All"="grey40", hcl(c(0,220), 50, 70) %>%
+                                              set_names("URM","Non-URM"))) +
+               coord_cartesian(ylim=c(0,maxy))
+             
+           })
+  
+  p = wrap_plots(pl, ncol=1, guides="collect") +
+    plot_annotation(theme=theme(legend.position="bottom",
+                                legend.box.margin=margin(t=-7,b=-12)),
+                    caption=paste("Data shown for courses worth 2+ units and with 20+ total enrollment for Spring/Fall 2021"))
+  
+  tabs[[i]] = p
+}
+
+
+```
+
+
+
+.panelset[
+
+.panel[.panel-name[ALS]
+
+```{r pchunk1, fig.width=13, fig.asp=0.45}
+
+tabs[["ALS"]]
+
+```
+]
+
+
+.panel[.panel-name[COB]
+
+```{r pchunk2, fig.width=13, fig.asp=0.45}
+
+tabs[["CBA"]]
+
+```
+]
+
+.panel[.panel-name[ECS]
+
+```{r pchunk3, fig.width=13, fig.asp=0.45}
+
+tabs[["ECS"]]
+
+```
+]
+
+.panel[.panel-name[ED]
+
+```{r pchunk4, fig.width=13, fig.asp=0.45}
+
+tabs[["ED"]]
+
+```
+]
+
+.panel[.panel-name[HHS]
+
+```{r pchunk5, fig.width=13, fig.asp=0.45}
+
+tabs[["HHS"]]
+
+```
+]
+
+.panel[.panel-name[NSM]
+
+```{r pchunk6, fig.width=13, fig.asp=0.45}
+
+tabs[["NSM"]]
+
+```
+]
+
+.panel[.panel-name[SP]
+
+```{r pchunk7, fig.width=13, fig.asp=0.45}
+
+tabs[["SP"]]
+
+```
+]
+
+.panel[.panel-name[SSIS]
+
+```{r pchunk8, fig.width=13, fig.asp=0.45}
+
+tabs[["SSIS"]]
+
+```
+]
+
+]
+
+
+
+---
+
+### First-semester GPA and student academic and socioeconomic background 
+
+.small-font[
+```{r p-grades-vs-ses, eval=FALSE}
+
+pfnc = function(data, yvar, ylab=NULL, min.coh.term.abbr="F17", points=TRUE, 
+                .se=FALSE, mytitle=NULL) {
+  data = data %>% 
+    filter(coh.term.abbr>= min.coh.term.abbr, 
+           grepl("Fall", coh.term)) %>% 
+    mutate(period = case_when(coh.term.abbr <= "F19" ~ paste0(min.coh.term.abbr,"-F19"),
+                              coh.term.abbr >= "F20" ~ as.character(coh.term.abbr)),
+           period=factor(period, levels=c(paste0(min.coh.term.abbr, "-F19"), paste0("F", 20:30)))) %>% 
+    select(emplid, period, {{yvar}}, 
+           "HS GPA"=hs.gpa, "SAT Math"=sat.math, "SAT Verbal"=sat.verbal, 
+           "11th Grade Math"=EAPMS, "11th Grade English"=EAPES,
+           "HS Free/Red Price Meal %"=last.school.attended.frpm.pct,
+           "Zip Code % HS degree or less"=zip.pct.high.school.or.less,
+           "Zip Code Median Income (thousands)"=home.zip.median.income,
+           "Adjusted Gross Income (thousands)"=agi.parents) %>% 
+    pivot_longer(-c(emplid, period, {{yvar}})) %>% 
+    filter(!(name=="Adjusted Gross Income (thousands)" & !between(value, -1e4,3e5)),
+           !(name=="Zip Code Median Income (thousands)" & !between(value, 25000, 1.5e5))) %>% 
+    group_by(name, period) %>% 
+    filter(mean(!is.na(value)) > 0.5) %>% 
+    ungroup %>% 
+    mutate(name=factor(name, levels=unique(name))) %>% 
+    group_by(name) %>% 
+    group_split() 
+  
+  #print(map(data, ~.x %>% count(name, is.na(value))))
+  
+  p = data %>% 
+    map(
+      ~{ p = .x %>% 
+        ggplot(aes(value, {{yvar}}, colour=period))
+      
+      if(points) {
+        p = p +
+          geom_point(size=0.3, colour="grey60", alpha=0.05) 
+      }
+      
+      p = p +
+        geom_smooth(se=.se, size=0.7, 
+                    #method="loess", span=1.5,
+                    method="gam", formula=y ~ s(x, bs="cs", k=3)) +
+        facet_wrap(vars(name), scales="free_x", nrow=1) +
+            labs_remove() + labs(y=ylab) +
+        guides(colour=guide_legend(nrow=1)) +
+        scale_colour_manual(values=c(viridis_pal(end=0.7)(2), "red") %>% 
+                              set_names("F17-F19", "F20","F21")) +
+        theme_classic2(base.size=10)
+      
+      rngy = .x %>% pull({{yvar}})
+      rngy = range(rngy, na.rm=TRUE)
+      if(rngy[2] <= 1) {
+        p = p + scale_y_pct()
+      } else {
+        p = p + scale_y_grade()
+      }
+      
+      if(grepl("Income", .x$name[1])) {
+        p = p + scale_x_continuous(labels=dollar_format(scale=1e-3), 
+                                   breaks=pretty_breaks(3))
+      } else if(grepl("GPA|SAT|11th", .x$name[1])) {
+        
+        lim = quantile(.x$value, na.rm=TRUE, probs=c(0.005, 0.995))
+        
+        p = p + scale_x_continuous( breaks=pretty_breaks(3)) + 
+          coord_cartesian(xlim=lim)
+      } else { 
+        p = p + scale_x_pct()
+      }
+      p
+      }
+    )
+  
+  #p[1:8] = map(p[1:8], ~.x + guides(colour="none"))
+  p[-c(1,6)] = map(p[-c(1,6)], ~.x + labs(y=NULL) + 
+                theme(axis.ticks.y=element_blank(),
+                      axis.text.y=element_blank()))
+  
+  wrap_plots(p, ncol=5, guides="collect") +
+    plot_annotation(theme=theme(legend.position="bottom"),
+                    subtitle=mytitle)
+}
+
+
+p1 = l %>% 
+  filter(base.time==1, grepl("Fr", coh)) %>% 
+  pfnc(ssr.cum.en.gpa, ylab="First-semester GPA")
+#p2 = l %>% filter(plan.college1st == college) %>% pfnc(mytitle = college)
+
+p1
+```
+
+```{r eval=FALSE}
+# p1 = l %>% 
+#   filter(base.time==1, grepl("Fr", coh), plan.college1=="ECS") %>% 
+#   pfnc(ssr.cum.en.gpa)
+# #p2 = l %>% filter(plan.college1st == college) %>% pfnc(mytitle = college)
+# 
+# p1
+
+p2 = l %>%
+  filter(base.time==8,  grepl("Fr", coh), plan.college1st=="ECS") %>% 
+  mutate(grad4 = as.numeric(pst.flgERS=="Graduated")) %>% 
+  pfnc(grad4, min.coh.term.abbr="F16", mytitle="Probability of graduating in four years for students who start as Engineering majors (Fall 2016/17 first-time cohorts)", points=FALSE) +plot_annotation(theme=theme(legend.position="none"))
+
+p2a = l %>%
+  filter(base.time==9, grepl("Fr", coh), plan.college1st=="ECS") %>% 
+  mutate(grad4 = as.numeric(pst.flgERS=="Graduated")) %>% 
+  pfnc(grad4, min.coh.term.abbr="F17", mytitle="Probability of graduating in 4.5 years for students who start as Engineering majors (Fall 2016/17 first-time cohorts)", points=FALSE) + plot_annotation(theme=theme(legend.position="none"))
+
+
+p3 = l %>%
+  filter(base.time==10, grepl("Fr", coh), plan.college1st=="ECS") %>% 
+  mutate(grad4 = as.numeric(pst.flgERS=="Graduated")) %>% 
+  pfnc(grad4, min.coh.term.abbr="F16", mytitle="Probability of graduating in five years for students who start as Engineering majors (Fall 2016 first-time cohort)", points=FALSE) + plot_annotation(theme=theme(legend.position="none"))
+
+
+pdat = l %>% 
+  filter(full.time.1st.flg!="Part time") %>% 
+  convert_outcomes_to_logical() %>% 
+  summarize_all_group_combinations(pst.flgERSproj, 
+                                   static.groups=c(coh.grps, "plan.college1st"), 
+                                   combo.groups=c("eth.ipeds.foreign"),
+                                   max.k=2) 
+pdat = pdat %>% 
+  bind_rows(
+    l %>% 
+      filter(full.time.1st.flg!="Part time") %>% 
+  convert_outcomes_to_logical() %>% 
+  summarize_all_group_combinations(pst.flgERSproj, 
+                                   static.groups=c(coh.grps), 
+                                   combo.groups=c("eth.ipeds.foreign"),
+                                   max.k=2) %>% 
+    mutate(plan.college1st="All")
+  )
+
+p4 = pdat %>%
+  filter(base.time==8, 
+         grepl("All|ECS", plan.college1st),
+         #grepl("All|College,", Variable), 
+         !grepl("For|Unk|Two", Group),
+         grepl("Fr", coh), 
+         grepl("Fall", coh.term), coh.term >="Fall 2009") %>% 
+  csus.data.analysis::plot_outcomes(coh.term.abbr, pst.flgERSproj_mean, group=Group) +
+  facet_wrap(vars(plan.college1st)) +
+  scale_y_continuous(expand=expansion(c(0.01,0)), labels=percent_format(accuracy=1),
+                     limits=c(0,1)) +
+  labs(title="Four-year graduation rates by ethnicity: All students and students who start as Engineering majors",
+       x="Cohort entering term",
+       caption="Shaded term is a projection")
+
+p4 =p4 + 
+  geom_tile(data=tibble(coh.term.abbr="F18", Group=NA), aes(x="F18", y=0.5), fill="grey10", alpha=0.05, colour=NA, width=0.5)
+
+p5 = pdat %>%
+  filter(base.time==12, 
+         grepl("All|ECS", plan.college1st),
+         #grepl("All|College,", Variable), 
+         !grepl("For|Unk|Two", Group),
+         grepl("Fr", coh), 
+         grepl("Fall", coh.term), coh.term >="Fall 2009") %>% 
+  csus.data.analysis::plot_outcomes(coh.term.abbr, pst.flgERSproj_mean, group=Group) +
+  facet_wrap(vars(plan.college1st)) +
+  scale_y_continuous(expand=expansion(c(0.01,0)), labels=percent_format(accuracy=1),
+                     limits=c(0,1)) +
+    labs(title="Six-year graduation rates by ethnicity: All students and students who start as Engineering majors",
+         x="Cohort entering term",
+       caption="Shaded term is a projection")
+
+p5 =p5 + 
+  geom_tile(data=tibble(coh.term.abbr="F16", Group=NA), aes(x="F16", y=0.5), fill="grey10", alpha=0.05, colour=NA, width=0.5)
+
+# Graduate in Engineering
+pdat.grad.same.college = l %>% 
+  filter(base.time==12) %>% 
+  mutate(deg.plan1 = case_when(term==current_term() & is.na(deg.plan1) & pst.flgERSproj=="Graduated" ~ acad.plan1,
+                               TRUE ~ deg.plan1)) %>% 
+  filter(full.time.1st.flg!="Part time") %>% 
+  left_join(
+    get_dept_and_college_by_plan() %>% 
+      select(deg.plan1=acad.plan, deg.college1=plan.college)
+  ) %>% 
+  mutate(pst.flgERSproj = case_when(is.na(deg.college1) ~ pst.flgERSproj,
+                                    deg.college1==plan.college1st & pst.flgERSproj=="Graduated" ~ "Graduated",
+                                    deg.college1!=plan.college1st & pst.flgERSproj=="Graduated" ~ "other major",
+                                    TRUE ~ pst.flgERSproj)) %>% 
+  convert_outcomes_to_logical() %>% 
+  summarize_all_group_combinations(pst.flgERSproj, 
+                                   static.groups=c(coh.grps, "plan.college1st"), 
+                                   combo.groups=c("eth.ipeds.foreign"),
+                                   max.k=2)
+
+pdat.grad.diff.college = l %>% 
+  filter(base.time==12) %>% 
+  mutate(deg.plan1 = case_when(term==current_term() & is.na(deg.plan1) & pst.flgERSproj=="Graduated" ~ acad.plan1,
+                               TRUE ~ deg.plan1)) %>% 
+  filter(full.time.1st.flg!="Part time") %>% 
+  left_join(
+    get_dept_and_college_by_plan() %>% 
+      select(deg.plan1=acad.plan, deg.college1=plan.college)
+  ) %>% 
+  mutate(pst.flgERSproj = case_when(is.na(deg.college1) ~ pst.flgERSproj,
+                                    deg.college1==plan.college1st & pst.flgERSproj=="Graduated" ~ "same major",
+                                    deg.college1!=plan.college1st & pst.flgERSproj=="Graduated" ~ "Graduated",
+                                    TRUE ~ pst.flgERSproj)) %>% 
+  convert_outcomes_to_logical() %>% 
+  summarize_all_group_combinations(pst.flgERSproj, 
+                                   static.groups=c(coh.grps, "plan.college1st"), 
+                                   combo.groups=c("eth.ipeds.foreign"),
+                                   max.k=2)
+
+p5a1 = pdat.grad.same.college %>%
+  filter(grepl("ECS", plan.college1st),
+         #grepl("All|College,", Variable), 
+         !grepl("For|Unk|Two", Group),
+         grepl("Fr", coh), 
+         grepl("Fall", coh.term), coh.term >="Fall 2009") %>% 
+  csus.data.analysis::plot_outcomes(coh.term.abbr, pst.flgERSproj_mean, group=Group) +
+  facet_wrap(vars(plan.college1st)) +
+  scale_y_continuous(expand=expansion(c(0.01,0)), labels=percent_format(accuracy=1),
+                     limits=c(0,1)) +
+    labs(title="Engineering degree", x="Cohort entering term")
+
+p5a2 = pdat.grad.diff.college %>%
+  filter(grepl("ECS", plan.college1st),
+         #grepl("All|College,", Variable), 
+         !grepl("For|Unk|Two", Group),
+         grepl("Fr", coh), 
+         grepl("Fall", coh.term), coh.term >="Fall 2009") %>% 
+  csus.data.analysis::plot_outcomes(coh.term.abbr, pst.flgERSproj_mean, group=Group) +
+  facet_wrap(vars(plan.college1st)) +
+  scale_y_continuous(expand=expansion(c(0.01,0)), labels=percent_format(accuracy=1),
+                     limits=c(0,1)) +
+    labs(title="Other degree", x="Cohort entering term")
+
+p5a1 + p5a2 + plot_annotation(title="Of students who started as Engineering majors: Percent graduating in six years")
+
+
+pdf("Probability of graduation for engineering majors.pdf", 10*1.5, 5*1.5)
+p2 
+p2a
+p3
+dev.off()
+
+pdf("Graduation by ethnicity.pdf", 10, 6)
+p4 
+p5
+list(p5a1, p5a2) %>%  
+  map(~.x + theme(strip.text.x=element_blank(), strip.background=element_blank()) +
+          geom_tile(data=tibble(coh.term.abbr="F16", Group=NA), aes(x="F16", y=0.5), fill="grey10", alpha=0.05, colour=NA, width=0.5)) %>% 
+  wrap_plots() + plot_annotation(title="Of first-time students who started as Engineering majors: Percent graduating in six years",
+                                 caption="Shaded term is a projection")
+dev.off()
+
+
+
+
+
+
+```
+]
+
+
+
+.center[
+```{r p-grades-vs-ses-out, ref.label="p-grades-vs-ses", fig.width=fw, fig.asp=0.5}
+```
+]
+
+---
+
+### Academic background and socioeconomic status by ethnicity
+
+.small-font[
+```{r p-background-by-eth, eval=FALSE}
+options(scipen=10)
+pdat = l %>% 
+  filter(base.time==1, coh.term>="Fall 2018", grepl("Fr", coh), grepl("F", coh.term)) %>%
+  mutate(pell.coh.term.flg=pell.coh.term.flg=="Pell",
+         first.gen.no.college.attendance=first.gen.no.college.attendance=="First generation") %>% 
+  select(eth.ipeds.foreign,  
+         #pell.coh.term.flg, first.gen.no.college.attendance,  
+      
+         hs.gpa, sat.math, sat.verbal, EAPMS, EAPES,
+          agi.parents,
+         home.zip.median.income, zip.pct.high.school.or.less, 
+         last.school.attended.frpm.pct) %>% 
+  pivot_longer(-c(eth.ipeds.foreign)) %>% 
+  mutate(eth.ipeds.foreign = abbreviate_labels(eth.ipeds.foreign, "max")) %>% 
+  mutate(eth.ipeds.foreign = fct_relevel(eth.ipeds.foreign, 
+                                         "Afr Amer", "Hispanic","Nat Amer","Pac Isl")) %>% 
+  mutate(name = recode(name, !!!get_name_recodes())) %>% 
+  mutate(name = factor(name, levels=unique(name))) %>% 
+    filter(!grepl("For|Unk", eth.ipeds.foreign))
+  
+pdat %>% 
+  ggplot(aes(eth.ipeds.foreign, value)) + 
+  geom_hline(data=. %>% 
+               group_by(name) %>%  
+               median_qi(value, na.rm=TRUE, .width=0.5) %>% 
+               ungroup %>% 
+               pivot_longer(c(value, .lower, .upper), values_to="x", names_to="nm"),
+             aes(yintercept=x), colour="grey80", size=0.3) + 
+  stat_pointinterval(point_interval=median_qi, .width=c(0.5), size=0.5, point_size=1.5,
+                     aes(colour=eth.ipeds.foreign)) +
+  facet_wrap(vars(name), ncol=5, scales="free_y") +
+  thm_rotate_xvar() +
+  guides(colour="none") +
+  #scale_y_continuous(labels=comma) +
+  labs_remove() +
+  labs(caption="Points are medians. Ranges are 25th - 75th percentiles. Gray lines are overall medians and 25th - 75th percentiles.") +
+  theme(plot.caption=element_text(size=rel(0.65), margin=margin(t=2)),
+        strip.text=element_text(size=rel(0.7)))
+
+```
+]
+
+.center[
+```{r p-background-by-eth-out, ref.label="p-background-by-eth", fig.width=fw, fig.asp=0.45}
+```
+]
+
+
+---
+
+### Course grades by instructor
+
+.small-font[
+```{r grade-by-instructor, eval=FALSE}
+byprof = cls %>%
+  filter(unt.taken >= 3, erss=="Y") %>% 
+  filter(term %in% most_recent_terms(7)) %>%
+  mutate(period = case_when(term <= "Fall 2019" ~ "Pre-pandemic",
+                            term=="Spring 2020" ~ "Pandemic begins",
+                            term %in% most_recent_terms(3) ~ "During pandemic")) %>% 
+  group_by(course, term, class.section) %>% 
+  # CHECK THIS: REMOVE SECTIONS WITH MOSTLY NON-UGD
+  #filter(! mean(acad.prog %in% c("UGT","UGED")) > 0.2) %>% 
+  ungroup %>% 
+  summarize_all_group_combinations(dfw.flg,
+                                   static.groups=c("period","acad.group", "dept.abbr", "subject",
+                                                   "course", "course.descr", "course.numeric",
+                                                   "div"),
+                                   combo.groups=c("instructor1", "eth.comb.foreign")) %>% 
+  mutate(period = fct_relevel(period, "Pre-pandemic", "Pandemic begins"))
+
+min.enrl=200
+byprof %>%
+  filter(period=="During pandemic", Variable %in% c("All", "instructor1"),
+         acad.group %notin% c("SP", "CCE")) %>% 
+  ungroup %>% 
+  arrange(Group!="All", desc(dfw.flg_mean)) %>% 
+  mutate(course=factor(course, levels=unique(course))) %>%
+  group_by(course) %>% 
+  filter(n() >= 5, any(n >= min.enrl)) %>% #distinct(course)
+  arrange(desc(course)) %>% 
+  group_by(acad.group) %>%
+  arrange(Group != "All", desc(dfw.flg_mean)) %>% 
+  filter(course %in% unique(course)[1:10]) %>% #group_by(course) %>% filter(Group=="All")
+  ggplot(aes(course, dfw.flg_mean, group=course)) +
+    geom_hline(yintercept=0.2, colour="grey80", size=0.25) + 
+    geom_line(colour="grey50", size=0.3) +
+    
+    geom_point(data=. %>% filter(Group != "All"), aes(size=n), 
+               colour="grey20", fill="grey60", shape=21) +
+    geom_point(data=. %>% filter(Group == "All"), 
+               aes(group=course), colour="red", shape=3, size=1.1) +
+    facet_grid(cols=vars(acad.group), scales="free_x", space="free_x") +
+    scale_y_continuous(labels=percent, expand=expansion(c(0.01,0.03)),
+                       limits=c(0,NA)) +
+    theme(strip.text.x=element_text(angle=0, hjust=0.5, margin=margin(l=2,r=2, t=2, b=2)),
+          axis.text.x=element_text(size=rel(0.7)),
+          legend.title=element_text(size=rel(0.7)),
+          legend.text=element_text(size=rel(0.6), hjust=1),
+          plot.caption=element_text(margin=margin(t=3))) +
+    scale_size_continuous(breaks=c(50,100,200,300,400), 
+                          range=c(0,3)) +
+    thm_rotate_xvar() +
+    labs(x=NULL, y=NULL, size="Enrollment", 
+         caption=str_wrap(paste0("Each point is one instructor. Red crosses are the overall DFW rate. Data for courses with at least ", min.enrl, " enrollments during Fall 2020 through Fall 2021."), 150))
+```
+]
+
+.center[
+```{r grade-by-instructor-out, ref.label="grade-by-instructor", fig.width=fw, fig.asp=0.5}
+```
+]
+
+---
+
+### Course grades by high school GPA and instructor
+
+.small-font[
+```{r course-grd-by-instr-hsgpa, eval=FALSE}
+cls %>% 
+  filter(erss=="Y", grepl("Fall|Spring", term)) %>% 
+  filter(term %in% most_recent_terms(3)) %>% #filter(course=="PUBH 50")
+  group_by(course) %>% 
+  filter(n() > 150, length(unique(instructor.emplid1)) >= 4, 
+         mean(is.na(hs.gpa)) < 0.2) %>%   
+  mutate(ntot=n()) %>% 
+  ungroup %>% 
+  arrange(desc(ntot)) %>% 
+  group_by(acad.group) %>% 
+  filter(course %notin% c("GNST 21")) %>% 
+  filter(course %in% unique(course)[1:5]) %>% #count(course)
+  ungroup %>% 
+  plot_course_grades_by_instructor(group.var=instructor1, terms=most_recent_terms(3),
+                                   ncol=7, courses=unique(.$course),
+                                   ) +
+  scale_y_grade() +
+  scale_x_continuous(breaks=pretty_breaks(3)) +
+  theme(strip.text=element_text(size=rel(0.6)),
+        legend.title=element_text(size=rel(0.8)),
+        legend.text=element_text(size=rel(0.7))) + labs(title=NULL)
+
+
+```
+]
+
+.center[
+```{r course-grd-by-instr-hsgpa-out, ref.label="course-grd-by-instr-hsgpa", fig.width=fw, fig.asp=0.52}
+```
+]
+
+
+
+---
